@@ -1,0 +1,20 @@
+#goal definition
+bool send_flag
+---
+#result definition
+float32[] stationaryObstacles
+float32[] flyZones
+float32[] waypoints
+float32 id
+float32[] lostCommsPos
+float32[] searchGridPoints
+float32[] offAxisOdlcPos
+float32[] mapCenterPos
+float32 mapHeight
+float32[] emergentLastKnownPos
+float32[] airDropBoundaryPoints
+float32[] airDropPos
+float32[] ugvDrivePos
+---
+#feedback
+bool filler
