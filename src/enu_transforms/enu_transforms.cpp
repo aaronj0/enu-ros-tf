@@ -20,14 +20,14 @@ namespace enu_transforms{
     void ENUtransforms::Run() {
 
 //// TO RUN WITH MISSION FILE
-//     private_nh_.param<std::string>("mission_file", mission_file_, "/home/summer/aaron/auvsi_ws_NED/src/potential_grid/config/mission_6.json");
+//     private_nh_.param<std::string>("mission_file", mission_file_, "<INSERT MISSION DIR>");
 //     // private_nh_.getParam("mission_file", mission_file_);
 //
 //     std::string package_path = ros::package::getPath("potential_grid");
 //     std::ifstream mission_file(package_path + mission_file_);
 //     std::string mission_string((std::istreambuf_iterator<char>(mission_file)),
 //                              std::istreambuf_iterator<char>());
-//     nlohmann::json interop_mission_data = nlohmann::json::parse("/home/summer/aaron/auvsi_ws_NED/src/potential_grid/config/mission_6.json");
+//     nlohmann::json interop_mission_data = nlohmann::json::parse("<INSERT MISSION DIR>");
 //
 //// TO RUN WITH INTEROP DATA
 
@@ -194,7 +194,7 @@ namespace enu_transforms{
 
 
     grid_map::Position ENUtransforms::GPStoGridMap(const double & lat, const double & longitude)
-    {   /// this multiplier thing is what you might have to find on
+    {   
         double n,e,u;
         double altitude = 0;
         ENU_geodetic_obj_.geodetic2Enu(lat, longitude, altitude, &e, &n, &u);
