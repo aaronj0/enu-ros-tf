@@ -20,8 +20,6 @@ enum waypt_enum {
 	airdrop_loc = 2,
 	cvrg_start = 3,
 	cvrg_end = 4,
-//    map_start = 5,
-//    map_end = 6
 };
 
-#endif //LAZY_THETA_STAR_3D_INCLUDE_LAZY_THETA_STAR_3D_COORD_TYPES_H
+#endif 

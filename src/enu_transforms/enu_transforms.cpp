@@ -2,13 +2,164 @@
 // Created by aaronjomyjoseph on 5/11/21.
 //
 
-// TODO : Add support to get ENU frame values for emergentLastKnownPos
 #include <iostream>
 #include <vector>
 #include "enu_transforms/enu_transforms.h"
 #include <grid_map_ros/grid_map_ros.hpp>
 
 namespace enu_transforms {
+
+
+    void ENUtransforms::setParams(int offset_set, double resolution_set, int multiplier_set) {
+        offset_ = offset_set;
+        resolution_ = resolution_set;
+        multiplier_ = multiplier_set;
+    }
+
+    double ENUtransforms::max(const double &a, const double &b) {
+        return a > b ? a : b;
+    }
+
+    double ENUtransforms::min(const double &a, const double &b) {
+        return a < b ? a : b;
+    }
+
+    grid_map::Position ENUtransforms::GPStoGridMap(const double &latitude, const double &longitude) {
+        double e, n, u;
+        double altitude = 0;
+        ENU_geodetic_obj_.geodetic2Enu(latitude, longitude, altitude, &e, &n, &u);
+        grid_map::Position gmap = ENUtoMap(e, n);
+        return gmap;
+    }
+
+    grid_map::Position ENUtransforms::ENUtoMap(const double &east, const double &north) {
+        return grid_map::Position{(east - min_east_) * multiplier_ - range_east_ / 2,
+                                  (north - min_north_) * multiplier_ - range_north_ / 2};
+    }
+
+    coordsW ENUtransforms::posToENU(const double &x, const double &y, const double &z) {
+        return {(x + range_east_ / 2) / multiplier_ + min_east_, (y + range_north_ / 2) / multiplier_ + min_north_,
+                (z)};
+    }
+
+    coordsW ENUtransforms::ENUtoGPS(double e, double n, double u) {
+        double lat, longitude, altitude;
+        ENU_geodetic_obj_.enu2Geodetic(e, n, u, &lat, &longitude, &altitude);
+        return {lat, longitude, altitude};
+    }
+
+
+    Eigen::Vector3d ENUtransforms::enuReferenceVector(const Eigen::Vector3d &enu) {
+        Eigen::Vector3d delta = enu_ref_origin - enu;
+        Eigen::Vector3d ref_vector = delta.normalized();
+        return ref_vector;
+    }
+
+
+    Eigen::Vector2d ENUtransforms::gpsReferenceVector(const Eigen::Vector2d &gps) {
+        Eigen::Vector2d delta = gps_origin - gps;
+        Eigen::Vector2d ref_vector = delta.normalized();
+        return ref_vector;
+    }
+
+    double ENUtransforms::haversine(Eigen::Vector2d point1, Eigen::Vector2d point2) {
+        double haversine;
+        double temp;
+        double dist_km;
+        double lat1 = point1.x() * DEG_TO_RAD;
+        double lon1 = point1.y() * DEG_TO_RAD;
+        double lat2 = point2.x() * DEG_TO_RAD;
+        double lon2 = point2.y() * DEG_TO_RAD;
+        haversine = (pow(sin((1.0 / 2) * (lat2 - lat1)), 2)) +
+                    ((cos(lat1)) * (cos(lat2)) * (pow(sin((1.0 / 2) * (lon2 - lon1)), 2)));
+        temp = 2 * asin(min(1.0, sqrt(haversine)));
+        dist_km = EARTH_RADIUS * temp;
+        double dist_ft = dist_km * 3280.84;
+        return dist_ft;
+    }
+
+    double ENUtransforms::getBearing(Eigen::Vector2d point1, Eigen::Vector2d point2) {
+        double lat1 = point2.x() * DEG_TO_RAD;
+        double lon1 = point2.y() * DEG_TO_RAD;
+        double lat2 = point1.x() * DEG_TO_RAD;
+        double lon2 = point1.y() * DEG_TO_RAD;
+
+        double dLon = (lon2 - lon1);
+        double y = sin(dLon) * cos(lat2);
+        double x = cos(lat1) * sin(lat2) - sin(lat1)
+                                           * cos(lat2) * cos(dLon);
+        double brng = atan2(y, x);
+
+        brng = brng * RAD_TO_DEG;
+        brng = ((int) brng + 360) % 360;
+        return brng;
+
+        return brng;
+    }
+
+    Eigen::Vector2d ENUtransforms::inverseHaversine(Eigen::Vector2d gps, double bearing, double dist_ft) {
+        double lat1 = gps.x() * DEG_TO_RAD;
+        double lon1 = gps.y() * DEG_TO_RAD;
+
+        double dist_km = dist_ft / 3280.84;
+        double dist_angular = dist_km / EARTH_RADIUS;
+        double theta = bearing * DEG_TO_RAD;
+        double lat2 = asin(sin(lat1) * cos(dist_angular) + cos(lat1) * sin(dist_angular) * cos(theta));
+        double lon2 =
+                lon1 + atan2(sin(theta) * sin(dist_angular) * cos(lat2), cos(dist_angular) - sin(lat2) * sin(lat2));
+        lat2 = lat2 * RAD_TO_DEG;
+        lon2 = lon2 * RAD_TO_DEG;
+        Eigen::Vector2d gps_obst_point(lat2, lon2);
+        return gps_obst_point;
+    }
+
+    std::vector<std::vector<double>>
+    ENUtransforms::genPoly(Eigen::Vector2d rad_point, Eigen::Vector2d centre_point, int n) {
+        std::vector<std::vector<double>> poly;
+        double center_lat = centre_point.x();
+        double center_long = centre_point.y();
+        double rad_lat = rad_point.x();
+        double rad_long = rad_point.y();
+
+        double radius = haversine(rad_point, centre_point);
+        double rad_metres = radius / 3.28084;
+
+        for (int k = 0; k < n; k++) {
+            double theta = M_PI * 2 * k / n;
+            double dx = rad_metres * cos(theta);
+            double dy = rad_metres * sin(theta);
+            std::vector<double> point;
+            point.push_back(center_lat + (180 / M_PI) * (dy / (EARTH_RADIUS * 1000)));
+            point.push_back(center_long + (180 / M_PI) * (dx / (EARTH_RADIUS * 1000)) / cos(center_lat * M_PI / 180));
+            poly.push_back(point);
+        }
+        poly.push_back(poly[0]);
+        return poly;
+    }
+
+    std::vector<std::vector<double>> ENUtransforms::GPSObstPoly(Eigen::Vector2d obst_centre, double radius) {
+        double bearing = getBearing(gps_origin, obst_centre);
+        Eigen::Vector2d rad_point = inverseHaversine(obst_centre, bearing, radius);
+        Eigen::Vector2d delta_rad(obst_centre.x() - rad_point.x(), obst_centre.y() - rad_point.y());
+        Eigen::Vector2d rad_point_further = rad_point + 2 * delta_rad;
+        std::vector<std::vector<double>> polygon = genPoly(rad_point, obst_centre, SIDES_OF_POLYGON);
+        return polygon;
+    }
+
+    obstacle_container ENUtransforms::geoObstoENU(obstacle_container ob) {
+        double obs_height = ob.height;
+        obstacle_container obs_enu;
+        double e, n, u;
+        for (int i = 0; i < ob.poly.size(); i += 1) {
+            double obs_lat = ob.poly[i][0];
+            double obs_long = ob.poly[i][1];
+            ENU_geodetic_obj_.geodetic2Enu(obs_lat, obs_long, obs_height, &e, &n, &u);
+            obs_enu.poly.push_back({e, n});
+        }
+        obs_enu.height = obs_height;
+        return obs_enu;
+    }
+} 
 
     void ENUtransforms::runENU() {
         std::setprecision(9);
@@ -198,157 +349,7 @@ namespace enu_transforms {
         range_east_ = (max_east - min_east) * multiplier_ + offset_ * 2 * resolution_;
     }
 
-    void ENUtransforms::setParams(int offset_set, double resolution_set, int multiplier_set) {
-        offset_ = offset_set;
-        resolution_ = resolution_set;
-        multiplier_ = multiplier_set;
-    }
-
-    double ENUtransforms::max(const double &a, const double &b) {
-        return a > b ? a : b;
-    }
-
-    double ENUtransforms::min(const double &a, const double &b) {
-        return a < b ? a : b;
-    }
-
-    grid_map::Position ENUtransforms::GPStoGridMap(const double &latitude, const double &longitude) {
-        double e, n, u;
-        double altitude = 0;
-        ENU_geodetic_obj_.geodetic2Enu(latitude, longitude, altitude, &e, &n, &u);
-        grid_map::Position gmap = ENUtoMap(e, n);
-        return gmap;
-    }
-
-    grid_map::Position ENUtransforms::ENUtoMap(const double &east, const double &north) {
-        return grid_map::Position{(east - min_east_) * multiplier_ - range_east_ / 2,
-                                  (north - min_north_) * multiplier_ - range_north_ / 2};
-    }
-
-    coordsW ENUtransforms::posToENU(const double &x, const double &y, const double &z) {
-        return {(x + range_east_ / 2) / multiplier_ + min_east_, (y + range_north_ / 2) / multiplier_ + min_north_,
-                (z)};
-    }
-
-    coordsW ENUtransforms::ENUtoGPS(double e, double n, double u) {
-        double lat, longitude, altitude;
-        ENU_geodetic_obj_.enu2Geodetic(e, n, u, &lat, &longitude, &altitude);
-        return {lat, longitude, altitude};
-    }
-
-
-    Eigen::Vector3d ENUtransforms::enuReferenceVector(const Eigen::Vector3d &enu) {
-        Eigen::Vector3d delta = enu_ref_origin - enu;
-        Eigen::Vector3d ref_vector = delta.normalized();
-        return ref_vector;
-    }
-
-
-    Eigen::Vector2d ENUtransforms::gpsReferenceVector(const Eigen::Vector2d &gps) {
-        Eigen::Vector2d delta = gps_origin - gps;
-        Eigen::Vector2d ref_vector = delta.normalized();
-        return ref_vector;
-    }
-
-    double ENUtransforms::haversine(Eigen::Vector2d point1, Eigen::Vector2d point2) {
-        double haversine;
-        double temp;
-        double dist_km;
-        double lat1 = point1.x() * DEG_TO_RAD;
-        double lon1 = point1.y() * DEG_TO_RAD;
-        double lat2 = point2.x() * DEG_TO_RAD;
-        double lon2 = point2.y() * DEG_TO_RAD;
-        haversine = (pow(sin((1.0 / 2) * (lat2 - lat1)), 2)) +
-                    ((cos(lat1)) * (cos(lat2)) * (pow(sin((1.0 / 2) * (lon2 - lon1)), 2)));
-        temp = 2 * asin(min(1.0, sqrt(haversine)));
-        dist_km = EARTH_RADIUS * temp;
-        double dist_ft = dist_km * 3280.84;
-        return dist_ft;
-    }
-
-    double ENUtransforms::getBearing(Eigen::Vector2d point1, Eigen::Vector2d point2) {
-        double lat1 = point2.x() * DEG_TO_RAD;
-        double lon1 = point2.y() * DEG_TO_RAD;
-        double lat2 = point1.x() * DEG_TO_RAD;
-        double lon2 = point1.y() * DEG_TO_RAD;
-
-        double dLon = (lon2 - lon1);
-        double y = sin(dLon) * cos(lat2);
-        double x = cos(lat1) * sin(lat2) - sin(lat1)
-                                           * cos(lat2) * cos(dLon);
-        double brng = atan2(y, x);
-
-        brng = brng * RAD_TO_DEG;
-        brng = ((int) brng + 360) % 360;
-        return brng;
-
-        return brng;
-    }
-
-    Eigen::Vector2d ENUtransforms::inverseHaversine(Eigen::Vector2d gps, double bearing, double dist_ft) {
-        double lat1 = gps.x() * DEG_TO_RAD;
-        double lon1 = gps.y() * DEG_TO_RAD;
-
-        double dist_km = dist_ft / 3280.84;
-        double dist_angular = dist_km / EARTH_RADIUS;
-        double theta = bearing * DEG_TO_RAD;
-        double lat2 = asin(sin(lat1) * cos(dist_angular) + cos(lat1) * sin(dist_angular) * cos(theta));
-        double lon2 =
-                lon1 + atan2(sin(theta) * sin(dist_angular) * cos(lat2), cos(dist_angular) - sin(lat2) * sin(lat2));
-        lat2 = lat2 * RAD_TO_DEG;
-        lon2 = lon2 * RAD_TO_DEG;
-        Eigen::Vector2d gps_obst_point(lat2, lon2);
-        return gps_obst_point;
-    }
-
-    std::vector<std::vector<double>>
-    ENUtransforms::genPoly(Eigen::Vector2d rad_point, Eigen::Vector2d centre_point, int n) {
-        std::vector<std::vector<double>> poly;
-        double center_lat = centre_point.x();
-        double center_long = centre_point.y();
-        double rad_lat = rad_point.x();
-        double rad_long = rad_point.y();
-
-        double radius = haversine(rad_point, centre_point);
-        double rad_metres = radius / 3.28084;
-
-        for (int k = 0; k < n; k++) {
-            double theta = M_PI * 2 * k / n;
-            double dx = rad_metres * cos(theta);
-            double dy = rad_metres * sin(theta);
-            std::vector<double> point;
-            point.push_back(center_lat + (180 / M_PI) * (dy / (EARTH_RADIUS * 1000)));
-            point.push_back(center_long + (180 / M_PI) * (dx / (EARTH_RADIUS * 1000)) / cos(center_lat * M_PI / 180));
-            poly.push_back(point);
-        }
-        poly.push_back(poly[0]);
-        return poly;
-    }
-
-    std::vector<std::vector<double>> ENUtransforms::GPSObstPoly(Eigen::Vector2d obst_centre, double radius) {
-        double bearing = getBearing(gps_origin, obst_centre);
-        Eigen::Vector2d rad_point = inverseHaversine(obst_centre, bearing, radius);
-        Eigen::Vector2d delta_rad(obst_centre.x() - rad_point.x(), obst_centre.y() - rad_point.y());
-        Eigen::Vector2d rad_point_further = rad_point + 2 * delta_rad;
-        std::vector<std::vector<double>> polygon = genPoly(rad_point, obst_centre, SIDES_OF_POLYGON);
-        return polygon;
-    }
-
-    obstacle_container ENUtransforms::geoObstoENU(obstacle_container ob) {
-        double obs_height = ob.height;
-        obstacle_container obs_enu;
-        double e, n, u;
-        for (int i = 0; i < ob.poly.size(); i += 1) {
-            double obs_lat = ob.poly[i][0];
-            double obs_long = ob.poly[i][1];
-            ENU_geodetic_obj_.geodetic2Enu(obs_lat, obs_long, obs_height, &e, &n, &u);
-            obs_enu.poly.push_back({e, n});
-        }
-        obs_enu.height = obs_height;
-        return obs_enu;
-    }
-}  // namespace
-
+    
 
 
 
